@@ -506,6 +506,17 @@
 
     // Exercise cards
     let html = '';
+
+    if (exercises.length === 0 && !showAddForm) {
+      html += `<div class="empty-state" style="padding:60px 20px 120px">
+        <div class="icon">🏋️</div>
+        <p style="margin-bottom:20px">No exercises added yet.</p>
+        <button class="btn-add-confirm" style="max-width:220px;margin:0 auto;display:block" onclick="openAdd()">+ Add exercise</button>
+      </div>`;
+      document.getElementById('main-content').innerHTML = html;
+      return;
+    }
+
     exercises.forEach(ex => {
       const isOpen = openCardId === ex.id;
       const last = getLastRecord(ex.name);
