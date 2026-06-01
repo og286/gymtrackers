@@ -418,7 +418,7 @@
   function getTodayWorkout(wKey) {
     const key = todayKey();
     if (!gymData[key]) gymData[key] = {};
-    if (!gymData[key][wKey] || !Array.isArray(gymData[key][wKey].exercises)) {
+    if (!gymData[key][wKey] || !Array.isArray(gymData[key][wKey].exercises) || gymData[key][wKey].exercises.length === 0) {
       gymData[key][wKey] = {
         exercises: DEFAULTS[wKey].exercises.map(name => ({
           id: crypto.randomUUID(), name, done: false, weight: null, reps: null
