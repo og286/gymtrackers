@@ -418,7 +418,7 @@
   function getTodayWorkout(wKey) {
     const key = todayKey();
     if (!gymData[key]) gymData[key] = {};
-    if (!gymData[key][wKey]) {
+    if (!gymData[key][wKey] || !Array.isArray(gymData[key][wKey].exercises)) {
       gymData[key][wKey] = {
         exercises: DEFAULTS[wKey].exercises.map(name => ({
           id: crypto.randomUUID(), name, done: false, weight: null, reps: null
@@ -475,7 +475,7 @@
     const names = meta.workoutNames || { w1: 'Upper Body', w2: 'Lower Body' };
     const wName = names[wKey];
     const { workout } = getTodayWorkout(wKey);
-    const exercises = workout.exercises;
+    const exercises = workout.exercises || [];
 
     // Title / rename
     const titleArea = document.getElementById('workout-title-area');
