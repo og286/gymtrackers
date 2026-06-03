@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Jo's Gym Tracker</title>
+  <title>Jon's Gym Tracker</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -243,7 +243,7 @@
 <!-- SETUP -->
 <div class="setup-screen" id="setup-screen">
   <div class="setup-logo">🏋️</div>
-  <h2>Jo's Gym Tracker</h2>
+  <h2>Jon's Gym Tracker</h2>
   <p>First-time setup — your workouts sync to a private GitHub Gist so your data is always safe.</p>
   <div class="setup-steps">
     <div class="setup-step">
@@ -268,7 +268,7 @@
 <div class="app-screen" id="app-screen">
   <header>
     <div class="header-top">
-      <h1>🏋️ Jo's Tracker</h1>
+      <h1>🏋️ Jon's Tracker</h1>
       <div class="sync-indicator">
         <div class="sync-dot" id="sync-dot"></div>
         <span id="sync-label">–</span>
@@ -300,9 +300,9 @@
 
 <script>
   // ── CONFIG ────────────────────────────────────────────────────────────────
-  const USER_LABEL      = 'Jo';
-  const STORAGE_PREFIX  = 'jo';
-  const GIST_FILENAME   = 'jo-gym-tracker.json';
+  const USER_LABEL      = 'Jon';
+  const STORAGE_PREFIX  = 'jon';
+  const GIST_FILENAME   = 'jon-gym-tracker.json';
 
   const DEFAULTS = {
     w1: { name: 'Upper Body', exercises: ['Bench Press','Overhead Press','Pull-ups','Barbell Row','Dumbbell Curl','Tricep Pushdown','Incline Press','Cable Row'] },
@@ -388,6 +388,8 @@
       const gist = await resp.json();
       gymData = JSON.parse(gist.files[GIST_FILENAME]?.content || '{}');
       meta = gymData._meta || { workoutNames: { w1: 'Upper Body', w2: 'Lower Body' } };
+      // Restore any in-progress draft for today that wasn't yet synced
+      loadDraft();
       setSyncStatus('synced','Synced');
     } catch(e) {
       setSyncStatus('error','Sync failed');
@@ -405,11 +407,41 @@
         body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(gymData, null, 2) } } })
       });
       if (!resp.ok) throw new Error();
+      clearDraft();
       setSyncStatus('synced','Saved ✓');
     } catch(e) {
       setSyncStatus('error','Save failed');
       toast('Could not save — check your connection');
     }
+  }
+
+
+  // ── DRAFT (localStorage) ─────────────────────────────────────────────────
+  // Saves today's workout to localStorage after every change so a page
+  // refresh mid-session doesn't lose progress.
+  function saveDraft() {
+    try {
+      const key = todayKey();
+      const draft = gymData[key] ? JSON.stringify(gymData[key]) : null;
+      if (draft) localStorage.setItem(`gymDraft_${STORAGE_PREFIX}_${key}`, draft);
+    } catch(e) {}
+  }
+
+  function loadDraft() {
+    try {
+      const key = todayKey();
+      const raw = localStorage.getItem(`gymDraft_${STORAGE_PREFIX}_${key}`);
+      if (raw) {
+        gymData[key] = JSON.parse(raw);
+      }
+    } catch(e) {}
+  }
+
+  function clearDraft() {
+    try {
+      const key = todayKey();
+      localStorage.removeItem(`gymDraft_${STORAGE_PREFIX}_${key}`);
+    } catch(e) {}
   }
 
   // ── DATA ──────────────────────────────────────────────────────────────────
@@ -859,6 +891,7 @@
     }
 
     openCardId = null;
+    saveDraft();
     render();
 
     if (ex.done) {
@@ -870,6 +903,7 @@
   function deleteExercise(wKey, id) {
     const { workout } = getTodayWorkout(wKey);
     workout.exercises = workout.exercises.filter(e => e.id !== id);
+    saveDraft();
     openCardId = null; render();
   }
 
@@ -880,6 +914,7 @@
     if (!name) return;
     const { workout } = getTodayWorkout(wKey);
     workout.exercises.push({ id: crypto.randomUUID(), name, done: false, weight: null, reps: null });
+    saveDraft();
     showAddForm = false; render(); toast(`Added ${name}`);
   }
 
@@ -887,6 +922,7 @@
     const { workout } = getTodayWorkout(wKey);
     if (workout.exercises.some(e => e.name === name)) { toast('Already in list'); return; }
     workout.exercises.push({ id: crypto.randomUUID(), name, done: false, weight: null, reps: null });
+    saveDraft();
     showAddForm = false; render(); toast(`Added ${name}`);
   }
 
