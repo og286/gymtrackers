@@ -435,6 +435,35 @@
     try {
       const ur = await fetch('https://api.github.com/user', { headers: authHeaders(t) });
       if (!ur.ok) throw new Error('Token invalid or missing gist scope.');
+
+      // Reuse an existing tracker Gist if one exists, so reconnecting
+      // (new phone, cleared site data) never loses history.
+      // If several match (e.g. an accidental empty duplicate), pick the
+      // one with the most logged days.
+      const lr = await fetch('https://api.github.com/gists?per_page=100', { headers: authHeaders(t) });
+      if (lr.ok) {
+        const candidates = (await lr.json()).filter(g => g.files && g.files[GIST_FILENAME]);
+        let bestId = null, bestDays = -1;
+        for (const g of candidates) {
+          try {
+            const gr = await fetch(`https://api.github.com/gists/${g.id}`, { headers: authHeaders(t) });
+            if (!gr.ok) continue;
+            const full = await gr.json();
+            const data = JSON.parse(full.files[GIST_FILENAME]?.content || '{}');
+            const days = Object.keys(data).filter(k => k !== '_meta').length;
+            if (days > bestDays) { bestDays = days; bestId = g.id; }
+          } catch(e) {}
+        }
+        if (bestId) {
+          token = t; gistId = bestId;
+          localStorage.setItem(`gymToken_${STORAGE_PREFIX}`, token);
+          localStorage.setItem(`gymGistId_${STORAGE_PREFIX}`, gistId);
+          showApp(); await loadFromGist();
+          toast('Reconnected to your existing data');
+          return;
+        }
+      }
+
       const init = { _meta: { workoutNames: { w1: 'Upper Body', w2: 'Lower Body' } } };
       const cr = await fetch('https://api.github.com/gists', {
         method: 'POST',

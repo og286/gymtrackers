@@ -1,6 +1,6 @@
 // Gym Tracker service worker — caches the app shell for offline loading.
 // GitHub API calls always go to the network.
-const CACHE = 'gym-tracker-v3';
+const CACHE = 'gym-tracker-v4';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
