@@ -359,6 +359,8 @@
 </div>
 
 <script>
+  const APP_VERSION = 'v5';
+
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
     jon: { label: 'Jon', prefix: 'jon', gistFile: 'jon-gym-tracker.json' },
@@ -786,7 +788,8 @@
 
     html += `<div class="settings-link">
       <span onclick="switchUser()">⇄ Switch user</span> &nbsp;·&nbsp;
-      <span onclick="resetSetup()">⚙ Disconnect</span>
+      <span onclick="resetSetup()">⚙ Disconnect</span> &nbsp;·&nbsp;
+      ${APP_VERSION}
     </div>`;
     document.getElementById('main-content').innerHTML = html;
     if (showAddForm) setTimeout(() => document.getElementById('new-ex-input')?.focus(), 50);
