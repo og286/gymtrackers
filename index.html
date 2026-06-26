@@ -250,6 +250,26 @@
     .btn-export { width: 100%; padding: 10px; background: white; border: 1px solid var(--gray-200); border-radius: 10px; color: var(--gray-600); font-size: 13px; font-weight: 600; cursor: pointer; }
     .btn-export:hover { border-color: var(--gray-400); }
 
+    /* CARDIO */
+    .cardio-form { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .cardio-type-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .cardio-type-btn { flex: 1; min-width: 80px; padding: 8px 6px; border: 1.5px solid var(--gray-200); border-radius: 99px; background: var(--gray-100); color: var(--gray-600); font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; transition: all 0.15s; }
+    .cardio-type-btn.active { background: var(--blue); border-color: var(--blue); color: white; }
+    .cardio-inputs { display: flex; gap: 10px; margin-bottom: 14px; }
+    .cardio-input-group { flex: 1; }
+    .cardio-input-group label { display: block; font-size: 11px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px; }
+    .cardio-input-group input { width: 100%; border: 1px solid var(--gray-200); border-radius: 8px; padding: 9px 10px; font-size: 16px; font-weight: 600; text-align: center; background: var(--gray-50); }
+    .cardio-input-group input:focus { outline: none; border-color: var(--blue); background: white; }
+    .btn-log-cardio { width: 100%; padding: 12px; background: var(--blue); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+    .btn-log-cardio:hover { opacity: 0.9; }
+    .cardio-entry-card { background: white; border: 1px solid var(--gray-200); border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
+    .cardio-entry-icon { font-size: 20px; flex-shrink: 0; }
+    .cardio-entry-info { flex: 1; }
+    .cardio-entry-type { font-weight: 600; font-size: 14px; }
+    .cardio-entry-detail { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+    .btn-del-cardio { background: none; border: none; color: var(--gray-400); font-size: 14px; cursor: pointer; padding: 4px; flex-shrink: 0; }
+    .btn-del-cardio:hover { color: var(--red); }
+
     .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-400); }
     .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
     .empty-state p { font-size: 14px; }
@@ -339,6 +359,7 @@
     <div class="tab-bar">
       <button class="tab active" id="tab-w1" onclick="switchTab('w1')">Workout 1</button>
       <button class="tab" id="tab-w2" onclick="switchTab('w2')">Workout 2</button>
+      <button class="tab" id="tab-cardio" onclick="switchTab('cardio')">Cardio</button>
       <button class="tab" id="tab-history" onclick="switchTab('history')">History</button>
     </div>
     <div class="timer-row">
@@ -390,6 +411,7 @@
   let showRenameForm = false;
   let lastSyncTime   = 0;
   let lastTimerSecs  = parseInt(localStorage.getItem('gymTimerSecs')) || 60;
+  let cardioSelectedType = 'run';
 
   // ── INIT ──────────────────────────────────────────────────────────────────
   document.getElementById('header-date').textContent =
@@ -675,6 +697,7 @@
     document.getElementById('tab-w1').textContent = names.w1;
     document.getElementById('tab-w2').textContent = names.w2;
     if (currentTab === 'history') { renderHistory(); return; }
+    if (currentTab === 'cardio') { renderCardio(); return; }
     renderWorkout(currentTab);
   }
 
@@ -901,6 +924,21 @@
     [...allDateKeys].reverse().forEach(dateKey => {
       const dayData = gymData[dateKey];
       let dayHtml = '';
+
+      // Cardio entries
+      const cardioEntries = dayData?.cardio || [];
+      if (cardioEntries.length) {
+        dayHtml += `<div class="history-workout-label">Cardio</div>`;
+        cardioEntries.forEach(e => {
+          const t = CARDIO_TYPES.find(x => x.id === e.type) || { icon: '🏃', label: e.type };
+          const parts = [e.distance ? `${e.distance}km` : null, e.time ? `${e.time}min` : null].filter(Boolean);
+          dayHtml += `<div class="history-card">
+            <div class="history-exercise-name">${t.icon} ${esc(t.label)}</div>
+            <div class="history-weight${parts.length ? '' : ' none'}">${parts.length ? esc(parts.join(' · ')) : '✓ done'}</div>
+          </div>`;
+        });
+      }
+
       ['w1','w2'].forEach(wKey => {
         const w = dayData?.[wKey];
         if (!w) return;
@@ -971,9 +1009,89 @@
 
   function hasAnyDone(dayData) {
     if (!dayData) return false;
+    if (dayData.cardio && dayData.cardio.length > 0) return true;
     return ['w1','w2'].some(wk =>
       (dayData[wk]?.exercises || []).some(e => e.done)
     );
+  }
+
+  const CARDIO_TYPES = [
+    { id: 'run',          label: 'Run',          icon: '🏃' },
+    { id: 'incline-walk', label: 'Incline Walk',  icon: '🏔️' },
+    { id: 'dog-walk',     label: 'Dog Walk',      icon: '🐕' },
+  ];
+
+  function renderCardio() {
+    document.getElementById('finish-bar').style.display = 'none';
+    document.getElementById('workout-title-area').innerHTML = '';
+
+    const key = todayKey();
+    const entries = gymData[key]?.cardio || [];
+
+    const typeBtns = CARDIO_TYPES.map(t =>
+      `<button class="cardio-type-btn${cardioSelectedType === t.id ? ' active' : ''}"
+        onclick="cardioSelectedType='${t.id}';renderCardio()">${t.icon} ${t.label}</button>`
+    ).join('');
+
+    const entriesHtml = entries.length
+      ? entries.map((e, i) => {
+          const t = CARDIO_TYPES.find(x => x.id === e.type) || { icon: '🏃', label: e.type };
+          const parts = [e.distance ? `${e.distance} km` : null, e.time ? `${e.time} min` : null].filter(Boolean);
+          return `<div class="cardio-entry-card">
+            <div class="cardio-entry-icon">${t.icon}</div>
+            <div class="cardio-entry-info">
+              <div class="cardio-entry-type">${t.label}</div>
+              ${parts.length ? `<div class="cardio-entry-detail">${parts.join(' · ')}</div>` : ''}
+            </div>
+            <button class="btn-del-cardio" onclick="deleteCardio(${i})" title="Remove">✕</button>
+          </div>`;
+        }).join('')
+      : `<div class="empty-state" style="padding:30px 20px"><div class="icon">🏃</div><p>No cardio logged today.</p></div>`;
+
+    document.getElementById('main-content').innerHTML = `
+      <div class="cardio-form">
+        <div class="cardio-type-row">${typeBtns}</div>
+        <div class="cardio-inputs">
+          <div class="cardio-input-group">
+            <label>Distance (km)</label>
+            <input type="number" id="cardio-distance" min="0" step="0.1" placeholder="–">
+          </div>
+          <div class="cardio-input-group">
+            <label>Time (min)</label>
+            <input type="number" id="cardio-time" min="0" placeholder="–">
+          </div>
+        </div>
+        <button class="btn-log-cardio" onclick="logCardio()">Log Cardio</button>
+      </div>
+      ${entriesHtml}
+      <div class="settings-link">
+        <span onclick="switchUser()">⇄ Switch user</span> &nbsp;·&nbsp;
+        <span onclick="resetSetup()">⚙ Disconnect</span> &nbsp;·&nbsp;
+        ${APP_VERSION}
+      </div>`;
+  }
+
+  function logCardio() {
+    const distance = parseFloat(document.getElementById('cardio-distance').value) || null;
+    const time = parseInt(document.getElementById('cardio-time').value) || null;
+    if (!distance && !time) { toast('Add at least a distance or time'); return; }
+    const key = todayKey();
+    if (!gymData[key]) gymData[key] = {};
+    if (!gymData[key].cardio) gymData[key].cardio = [];
+    gymData[key].cardio.push({ type: cardioSelectedType, distance, time });
+    saveDraft();
+    saveToGist();
+    toast('Cardio logged!');
+    renderCardio();
+  }
+
+  function deleteCardio(i) {
+    const key = todayKey();
+    if (!gymData[key]?.cardio) return;
+    gymData[key].cardio.splice(i, 1);
+    saveDraft();
+    saveToGist();
+    renderCardio();
   }
 
   let histSelectedEx = '';
@@ -1079,7 +1197,7 @@
   // ── ACTIONS ───────────────────────────────────────────────────────────────
   function switchTab(tab) {
     currentTab = tab;
-    ['w1','w2','history'].forEach(t =>
+    ['w1','w2','cardio','history'].forEach(t =>
       document.getElementById('tab-'+t).classList.toggle('active', t===tab));
     openCardId = null; cardRows = null; showAddForm = false; showRenameForm = false;
     render();
