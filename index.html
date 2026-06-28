@@ -167,6 +167,9 @@
     .set-input:focus { outline: none; border-color: var(--green); background: white; }
     .btn-del-set { background: none; border: none; color: var(--gray-400); font-size: 14px; cursor: pointer; padding: 4px; width: 26px; flex-shrink: 0; }
     .btn-del-set:hover { color: var(--red); }
+    .set-checkbox { width: 20px; height: 20px; accent-color: var(--green); cursor: pointer; flex-shrink: 0; margin: 0; }
+    .set-row.set-done .set-input { opacity: 0.45; }
+    .set-row.set-done .set-num { color: var(--green-dark); font-weight: 800; }
     .btn-add-set { width: 100%; padding: 8px; background: var(--gray-100); border: 1px dashed var(--gray-200); border-radius: 8px; color: var(--gray-600); font-size: 13px; cursor: pointer; margin: 2px 0 12px; }
     .btn-add-set:hover { border-color: var(--green); color: var(--green-dark); }
 
@@ -380,7 +383,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v6';
+  const APP_VERSION = 'v7';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -702,7 +705,7 @@
   }
 
   function renderWorkout(wKey) {
-    document.getElementById('finish-bar').style.display = '';
+    document.getElementById('finish-bar').style.display = openCardId ? 'none' : '';
 
     const names = meta.workoutNames || { w1: 'Upper Body', w2: 'Lower Body' };
     const wName = names[wKey];
@@ -752,7 +755,9 @@
       if (isOpen) {
         const rows = cardRows || [{w:'',r:''}];
         const rowsHtml = rows.map((r,i) => `
-          <div class="set-row">
+          <div class="set-row${r.done ? ' set-done' : ''}" id="set-row-${ex.id}-${i}">
+            <input type="checkbox" class="set-checkbox" id="sc-${ex.id}-${i}" ${r.done ? 'checked' : ''}
+              onchange="toggleSetDone('${ex.id}',${i},this.checked)">
             <span class="set-num">${i+1}</span>
             <input type="number" class="set-input" id="sw-${ex.id}-${i}" min="0" step="0.5" placeholder="kg" value="${r.w}">
             <input type="number" class="set-input" id="sr-${ex.id}-${i}" min="0" placeholder="reps" value="${r.r}">
@@ -760,6 +765,7 @@
           </div>`).join('');
         panelHtml = `
           <div class="set-row">
+            <span style="width:20px;flex-shrink:0"></span>
             <span class="set-num">Set</span>
             <span class="set-col">Weight (kg)</span>
             <span class="set-col">Reps</span>
@@ -1220,8 +1226,8 @@
       const last = getLastRecord(ex.name);
       ss = last ? last.sets : [];
     }
-    const rows = ss.map(s => ({ w: s.w || '', r: s.r || '' }));
-    if (!rows.length) rows.push({ w:'', r:'' });
+    const rows = ss.map(s => ({ w: s.w || '', r: s.r || '', done: s.done || false }));
+    if (!rows.length) rows.push({ w:'', r:'', done: false });
     return rows;
   }
 
@@ -1230,13 +1236,14 @@
     if (!openCardId || !cardRows) return;
     cardRows = cardRows.map((row, i) => ({
       w: document.getElementById(`sw-${openCardId}-${i}`)?.value ?? row.w,
-      r: document.getElementById(`sr-${openCardId}-${i}`)?.value ?? row.r
+      r: document.getElementById(`sr-${openCardId}-${i}`)?.value ?? row.r,
+      done: document.getElementById(`sc-${openCardId}-${i}`)?.checked ?? row.done
     }));
   }
 
   function addSetRow(id) {
     readCardRows();
-    cardRows.push({ w:'', r:'' });
+    cardRows.push({ w:'', r:'', done: false });
     render();
     setTimeout(() => document.getElementById(`sw-${id}-${cardRows.length-1}`)?.focus(), 50);
   }
@@ -1259,7 +1266,7 @@
     } else {
       readCardRows();
       const sets = (cardRows || [])
-        .map(r => ({ w: parseFloat(r.w) || 0, r: parseInt(r.r) || 0 }))
+        .map(r => ({ w: parseFloat(r.w) || 0, r: parseInt(r.r) || 0, done: r.done || false }))
         .filter(s => s.w > 0 || s.r > 0);
       ex.sets = sets;
       // Keep legacy fields in step (best set) for backward compatibility
@@ -1285,6 +1292,11 @@
       if (workout.exercises.every(e => e.done)) setTimeout(celebrate, 300);
       else startTimer(lastTimerSecs, false); // auto rest timer between exercises
     }
+  }
+
+  function toggleSetDone(exId, i, checked) {
+    const row = document.getElementById(`set-row-${exId}-${i}`);
+    if (row) row.classList.toggle('set-done', checked);
   }
 
   function moveExercise(wKey, id, dir) {
