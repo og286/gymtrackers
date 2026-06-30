@@ -410,7 +410,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v8';
+  const APP_VERSION = 'v9';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -447,6 +447,8 @@
   let foodSearchResults = [];
   let foodSearchTimer = null;
   let foodSelected = null;     // { name, kcalPer100, custom? }
+  let recipeBasis = 'per100';  // 'per100' | 'whole' — for the custom recipe form
+  let foodCustomNameDraft = '';
 
   // ── INIT ──────────────────────────────────────────────────────────────────
   document.getElementById('header-date').textContent =
@@ -1164,9 +1166,20 @@
     } else if (foodMode === 'custom') {
       stepHtml = `
         <div class="food-entry-form">
-          <input type="text" id="custom-food-name" placeholder="Recipe / food name…" maxlength="60">
-          <input type="number" id="custom-food-kcal" min="0" step="1" placeholder="kcal per 100g"
-            onkeydown="if(event.key==='Enter')confirmCustomFood()">
+          <input type="text" id="custom-food-name" placeholder="Recipe / food name…" maxlength="60"
+            value="${esc(foodCustomNameDraft)}">
+          <div class="cardio-type-row" style="margin-bottom:10px">
+            <button type="button" class="cardio-type-btn${recipeBasis==='per100'?' active':''}" onclick="setRecipeBasis('per100')">Per 100g</button>
+            <button type="button" class="cardio-type-btn${recipeBasis==='whole'?' active':''}" onclick="setRecipeBasis('whole')">Whole recipe</button>
+          </div>
+          ${recipeBasis === 'whole' ? `
+            <input type="number" id="custom-food-total-kcal" min="0" step="1" placeholder="Total kcal for whole recipe">
+            <input type="number" id="custom-food-total-qty" min="0" step="1" placeholder="Total weight of recipe (g)"
+              onkeydown="if(event.key==='Enter')confirmCustomFood()">
+          ` : `
+            <input type="number" id="custom-food-kcal" min="0" step="1" placeholder="kcal per 100g"
+              onkeydown="if(event.key==='Enter')confirmCustomFood()">
+          `}
           <div class="log-actions">
             <button class="btn-log-food" onclick="confirmCustomFood()">Use this</button>
             <button class="btn-move" onclick="toggleFoodMode()">‹ Search instead</button>
@@ -1219,6 +1232,14 @@
 
   function toggleFoodMode() {
     foodMode = foodMode === 'search' ? 'custom' : 'search';
+    recipeBasis = 'per100'; foodCustomNameDraft = '';
+    render();
+  }
+
+  function setRecipeBasis(basis) {
+    const nameEl = document.getElementById('custom-food-name');
+    if (nameEl) foodCustomNameDraft = nameEl.value;
+    recipeBasis = basis;
     render();
   }
 
@@ -1286,10 +1307,21 @@
 
   function confirmCustomFood() {
     const name = document.getElementById('custom-food-name')?.value.trim();
-    const kcal = parseFloat(document.getElementById('custom-food-kcal')?.value);
-    if (!name || !(kcal >= 0)) { toast('Enter a name and kcal per 100g'); return; }
-    foodSelected = { name, kcalPer100: kcal, custom: true };
-    foodMode = 'search';
+    if (!name) { toast('Enter a name'); return; }
+
+    let kcalPer100;
+    if (recipeBasis === 'whole') {
+      const totalKcal = parseFloat(document.getElementById('custom-food-total-kcal')?.value);
+      const totalQty  = parseFloat(document.getElementById('custom-food-total-qty')?.value);
+      if (!(totalKcal >= 0) || !(totalQty > 0)) { toast('Enter total kcal and total weight'); return; }
+      kcalPer100 = totalKcal / totalQty * 100;
+    } else {
+      kcalPer100 = parseFloat(document.getElementById('custom-food-kcal')?.value);
+      if (!(kcalPer100 >= 0)) { toast('Enter kcal per 100g'); return; }
+    }
+
+    foodSelected = { name, kcalPer100, custom: true };
+    foodMode = 'search'; recipeBasis = 'per100'; foodCustomNameDraft = '';
     render();
   }
 
