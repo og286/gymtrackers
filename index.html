@@ -273,6 +273,32 @@
     .btn-del-cardio { background: none; border: none; color: var(--gray-400); font-size: 14px; cursor: pointer; padding: 4px; flex-shrink: 0; }
     .btn-del-cardio:hover { color: var(--red); }
 
+    /* FOOD */
+    .food-total-bar { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: center; }
+    .food-total-num { font-size: 32px; font-weight: 800; color: var(--green-dark); font-variant-numeric: tabular-nums; }
+    .food-total-label { font-size: 11px; color: var(--gray-400); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+    .food-entry-form { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .food-entry-form input[type=text], .food-entry-form input[type=number] { width: 100%; border: 1px solid var(--gray-200); border-radius: 8px; padding: 10px 12px; font-size: 15px; margin-bottom: 10px; background: var(--gray-50); }
+    .food-entry-form input:focus { outline: none; border-color: var(--green); background: white; }
+    .food-mode-toggle { text-align: center; font-size: 13px; color: var(--blue); cursor: pointer; padding-top: 2px; }
+    .food-mode-toggle:hover { text-decoration: underline; }
+    .food-results { margin: -2px 0 10px; max-height: 280px; overflow-y: auto; }
+    .food-result-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
+    .food-result-item:last-child { border-bottom: none; }
+    .food-result-item:hover { background: var(--gray-50); }
+    .food-result-name { font-size: 14px; font-weight: 600; }
+    .food-result-brand { font-size: 11px; color: var(--gray-400); margin-top: 1px; }
+    .food-result-kcal { font-size: 12px; color: var(--green-dark); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+    .food-search-status { font-size: 13px; color: var(--gray-400); padding: 10px 4px; }
+    .food-selected-name { font-weight: 700; font-size: 15px; }
+    .food-selected-kcal { font-size: 12px; color: var(--gray-400); margin: 2px 0 12px; }
+    .food-qty-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .food-qty-row input[type=number] { width: auto; flex: 2; margin-bottom: 0; }
+    .food-qty-row select { flex: 1; border: 1px solid var(--gray-200); border-radius: 8px; padding: 10px 8px; font-size: 15px; background: var(--gray-50); color: var(--gray-800); }
+    .food-qty-row select:focus { outline: none; border-color: var(--green); }
+    .btn-log-food { flex: 1; padding: 11px; background: var(--green); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+    .btn-log-food:hover { background: var(--green-dark); }
+
     .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-400); }
     .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
     .empty-state p { font-size: 14px; }
@@ -363,6 +389,7 @@
       <button class="tab active" id="tab-w1" onclick="switchTab('w1')">Workout 1</button>
       <button class="tab" id="tab-w2" onclick="switchTab('w2')">Workout 2</button>
       <button class="tab" id="tab-cardio" onclick="switchTab('cardio')">Cardio</button>
+      <button class="tab" id="tab-food" onclick="switchTab('food')">Food</button>
       <button class="tab" id="tab-history" onclick="switchTab('history')">History</button>
     </div>
     <div class="timer-row">
@@ -383,7 +410,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v7';
+  const APP_VERSION = 'v8';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -415,6 +442,11 @@
   let lastSyncTime   = 0;
   let lastTimerSecs  = parseInt(localStorage.getItem('gymTimerSecs')) || 60;
   let cardioSelectedType = 'run';
+  let foodMode = 'search';     // 'search' | 'custom'
+  let foodSearchQuery = '';
+  let foodSearchResults = [];
+  let foodSearchTimer = null;
+  let foodSelected = null;     // { name, kcalPer100, custom? }
 
   // ── INIT ──────────────────────────────────────────────────────────────────
   document.getElementById('header-date').textContent =
@@ -701,6 +733,7 @@
     document.getElementById('tab-w2').textContent = names.w2;
     if (currentTab === 'history') { renderHistory(); return; }
     if (currentTab === 'cardio') { renderCardio(); return; }
+    if (currentTab === 'food') { renderFood(); return; }
     renderWorkout(currentTab);
   }
 
@@ -1100,6 +1133,189 @@
     renderCardio();
   }
 
+  // ── FOOD ──────────────────────────────────────────────────────────────────
+  function renderFood() {
+    document.getElementById('finish-bar').style.display = 'none';
+    document.getElementById('workout-title-area').innerHTML = '';
+
+    const key = todayKey();
+    const entries = gymData[key]?.food || [];
+    const total = entries.reduce((s,e) => s + (e.kcal || 0), 0);
+
+    let stepHtml = '';
+    if (foodSelected) {
+      stepHtml = `
+        <div class="food-entry-form">
+          <div class="food-selected-name">${esc(foodSelected.name)}</div>
+          <div class="food-selected-kcal">${Math.round(foodSelected.kcalPer100)} kcal / 100g</div>
+          <div class="food-qty-row">
+            <input type="number" id="food-qty" min="0" step="1" placeholder="Quantity"
+              onkeydown="if(event.key==='Enter')logFood()">
+            <select id="food-unit">
+              <option value="g">g</option>
+              <option value="ml">ml</option>
+            </select>
+          </div>
+          <div class="log-actions">
+            <button class="btn-log-food" onclick="logFood()">Log it</button>
+            <button class="btn-move" onclick="foodSelected=null;render()">Cancel</button>
+          </div>
+        </div>`;
+    } else if (foodMode === 'custom') {
+      stepHtml = `
+        <div class="food-entry-form">
+          <input type="text" id="custom-food-name" placeholder="Recipe / food name…" maxlength="60">
+          <input type="number" id="custom-food-kcal" min="0" step="1" placeholder="kcal per 100g"
+            onkeydown="if(event.key==='Enter')confirmCustomFood()">
+          <div class="log-actions">
+            <button class="btn-log-food" onclick="confirmCustomFood()">Use this</button>
+            <button class="btn-move" onclick="toggleFoodMode()">‹ Search instead</button>
+          </div>
+        </div>`;
+    } else {
+      stepHtml = `
+        <div class="food-entry-form">
+          <input type="text" id="food-search-input" placeholder="Search a food…"
+            value="${esc(foodSearchQuery)}" oninput="onFoodSearchInput(this.value)">
+          <div class="food-results" id="food-results"></div>
+          <div class="food-mode-toggle" onclick="toggleFoodMode()">+ Add your own recipe</div>
+        </div>`;
+    }
+
+    const entriesHtml = entries.length
+      ? entries.map((e,i) => `
+          <div class="cardio-entry-card">
+            <div class="cardio-entry-icon">🍽️</div>
+            <div class="cardio-entry-info">
+              <div class="cardio-entry-type">${esc(e.name)}</div>
+              <div class="cardio-entry-detail">${e.qty}${esc(e.unit)} · ${e.kcal} kcal</div>
+            </div>
+            <button class="btn-del-cardio" onclick="deleteFoodEntry(${i})" title="Remove">✕</button>
+          </div>`).reverse().join('')
+      : `<div class="empty-state" style="padding:30px 20px"><div class="icon">🍽️</div><p>No food logged today.</p></div>`;
+
+    document.getElementById('main-content').innerHTML = `
+      <div class="food-total-bar">
+        <div class="food-total-num">${total}</div>
+        <div class="food-total-label">kcal today</div>
+      </div>
+      ${stepHtml}
+      ${entriesHtml}
+      <div class="settings-link">
+        <span onclick="switchUser()">⇄ Switch user</span> &nbsp;·&nbsp;
+        <span onclick="resetSetup()">⚙ Disconnect</span> &nbsp;·&nbsp;
+        ${APP_VERSION}
+      </div>`;
+
+    if (!foodSelected && foodMode === 'search') {
+      if (foodSearchQuery.trim()) runFoodSearch(foodSearchQuery.trim());
+      setTimeout(() => document.getElementById('food-search-input')?.focus(), 50);
+    } else if (foodSelected) {
+      setTimeout(() => document.getElementById('food-qty')?.focus(), 50);
+    } else if (foodMode === 'custom') {
+      setTimeout(() => document.getElementById('custom-food-name')?.focus(), 50);
+    }
+  }
+
+  function toggleFoodMode() {
+    foodMode = foodMode === 'search' ? 'custom' : 'search';
+    render();
+  }
+
+  // Debounced search-as-you-type. Updates only the #food-results container
+  // (not a full render()) so the search input never loses focus mid-type.
+  function onFoodSearchInput(val) {
+    foodSearchQuery = val;
+    clearTimeout(foodSearchTimer);
+    const resultsEl = document.getElementById('food-results');
+    if (!val.trim()) {
+      foodSearchResults = [];
+      if (resultsEl) resultsEl.innerHTML = '';
+      return;
+    }
+    foodSearchTimer = setTimeout(() => runFoodSearch(val.trim()), 400);
+  }
+
+  async function runFoodSearch(query) {
+    const resultsEl = document.getElementById('food-results');
+    if (!resultsEl) return;
+    resultsEl.innerHTML = `<div class="food-search-status">Searching…</div>`;
+    try {
+      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=15&fields=product_name,brands,nutriments`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error();
+      const data = await resp.json();
+      const items = (data.products || [])
+        .map(p => ({
+          name: (p.product_name || '').trim(),
+          brand: (p.brands || '').split(',')[0].trim(),
+          kcalPer100: p.nutriments ? p.nutriments['energy-kcal_100g'] : undefined
+        }))
+        .filter(it => it.name && typeof it.kcalPer100 === 'number' && !isNaN(it.kcalPer100))
+        .slice(0, 10);
+
+      // Stale response guard: query may have changed while this was in flight
+      if (foodSearchQuery.trim() !== query) return;
+
+      foodSearchResults = items;
+      if (!items.length) {
+        resultsEl.innerHTML = `<div class="food-search-status">No results with calorie data — try "add your own recipe".</div>`;
+        return;
+      }
+      resultsEl.innerHTML = items.map((it,i) => `
+        <div class="food-result-item" onclick="selectFoodResult(${i})">
+          <div class="food-result-info">
+            <div class="food-result-name">${esc(it.name)}</div>
+            ${it.brand ? `<div class="food-result-brand">${esc(it.brand)}</div>` : ''}
+          </div>
+          <div class="food-result-kcal">${Math.round(it.kcalPer100)} kcal/100g</div>
+        </div>`).join('');
+    } catch(e) {
+      if (foodSearchQuery.trim() !== query) return;
+      resultsEl.innerHTML = `<div class="food-search-status">Search failed — check your connection.</div>`;
+    }
+  }
+
+  function selectFoodResult(i) {
+    const it = foodSearchResults[i];
+    if (!it) return;
+    foodSelected = { name: it.name, kcalPer100: it.kcalPer100 };
+    foodSearchQuery = ''; foodSearchResults = [];
+    render();
+  }
+
+  function confirmCustomFood() {
+    const name = document.getElementById('custom-food-name')?.value.trim();
+    const kcal = parseFloat(document.getElementById('custom-food-kcal')?.value);
+    if (!name || !(kcal >= 0)) { toast('Enter a name and kcal per 100g'); return; }
+    foodSelected = { name, kcalPer100: kcal, custom: true };
+    foodMode = 'search';
+    render();
+  }
+
+  function logFood() {
+    const qty = parseFloat(document.getElementById('food-qty')?.value);
+    const unit = document.getElementById('food-unit')?.value || 'g';
+    if (!(qty > 0)) { toast('Enter a quantity'); return; }
+    const kcal = Math.round(foodSelected.kcalPer100 * qty / 100);
+    const key = todayKey();
+    if (!gymData[key]) gymData[key] = {};
+    if (!gymData[key].food) gymData[key].food = [];
+    gymData[key].food.push({ id: crypto.randomUUID(), name: foodSelected.name, qty, unit, kcal });
+    foodSelected = null;
+    saveDraft(); saveToGist();
+    toast(`Logged ${qty}${unit} — ${kcal} kcal`);
+    render();
+  }
+
+  function deleteFoodEntry(i) {
+    const key = todayKey();
+    if (!gymData[key]?.food) return;
+    gymData[key].food.splice(i, 1);
+    saveDraft(); saveToGist();
+    render();
+  }
+
   let histSelectedEx = '';
 
   function shiftCalendar(dir) {
@@ -1203,9 +1419,10 @@
   // ── ACTIONS ───────────────────────────────────────────────────────────────
   function switchTab(tab) {
     currentTab = tab;
-    ['w1','w2','cardio','history'].forEach(t =>
+    ['w1','w2','cardio','food','history'].forEach(t =>
       document.getElementById('tab-'+t).classList.toggle('active', t===tab));
     openCardId = null; cardRows = null; showAddForm = false; showRenameForm = false;
+    foodSelected = null; foodMode = 'search'; foodSearchQuery = ''; foodSearchResults = [];
     render();
   }
 
