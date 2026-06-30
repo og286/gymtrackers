@@ -410,7 +410,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v9';
+  const APP_VERSION = 'v10';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -1173,8 +1173,8 @@
             <button type="button" class="cardio-type-btn${recipeBasis==='whole'?' active':''}" onclick="setRecipeBasis('whole')">Whole recipe</button>
           </div>
           ${recipeBasis === 'whole' ? `
-            <input type="number" id="custom-food-total-kcal" min="0" step="1" placeholder="Total kcal for whole recipe">
-            <input type="number" id="custom-food-total-qty" min="0" step="1" placeholder="Total weight of recipe (g)"
+            <input type="number" id="custom-food-total-kcal" min="0" step="1" placeholder="Total kcal">
+            <input type="number" id="custom-food-total-qty" min="0" step="1" placeholder="Total weight (g) — optional, leave blank to log as one item"
               onkeydown="if(event.key==='Enter')confirmCustomFood()">
           ` : `
             <input type="number" id="custom-food-kcal" min="0" step="1" placeholder="kcal per 100g"
@@ -1201,7 +1201,7 @@
             <div class="cardio-entry-icon">🍽️</div>
             <div class="cardio-entry-info">
               <div class="cardio-entry-type">${esc(e.name)}</div>
-              <div class="cardio-entry-detail">${e.qty}${esc(e.unit)} · ${e.kcal} kcal</div>
+              <div class="cardio-entry-detail">${e.qty ? `${e.qty}${esc(e.unit)} · ` : ''}${e.kcal} kcal</div>
             </div>
             <button class="btn-del-cardio" onclick="deleteFoodEntry(${i})" title="Remove">✕</button>
           </div>`).reverse().join('')
@@ -1309,17 +1309,28 @@
     const name = document.getElementById('custom-food-name')?.value.trim();
     if (!name) { toast('Enter a name'); return; }
 
-    let kcalPer100;
     if (recipeBasis === 'whole') {
       const totalKcal = parseFloat(document.getElementById('custom-food-total-kcal')?.value);
-      const totalQty  = parseFloat(document.getElementById('custom-food-total-qty')?.value);
-      if (!(totalKcal >= 0) || !(totalQty > 0)) { toast('Enter total kcal and total weight'); return; }
-      kcalPer100 = totalKcal / totalQty * 100;
-    } else {
-      kcalPer100 = parseFloat(document.getElementById('custom-food-kcal')?.value);
-      if (!(kcalPer100 >= 0)) { toast('Enter kcal per 100g'); return; }
+      const totalQtyRaw = document.getElementById('custom-food-total-qty')?.value;
+      const totalQty = totalQtyRaw ? parseFloat(totalQtyRaw) : null;
+      if (!(totalKcal >= 0)) { toast('Enter total kcal'); return; }
+
+      if (totalQty > 0) {
+        // Weight given — derive a per-100g basis so a portion can be logged next.
+        foodSelected = { name, kcalPer100: totalKcal / totalQty * 100, custom: true };
+        foodMode = 'search'; recipeBasis = 'per100'; foodCustomNameDraft = '';
+        render();
+      } else {
+        // No weight — log the whole thing now as a single fixed-kcal entry.
+        logFoodEntry(name, totalKcal, null, '');
+        foodMode = 'search'; recipeBasis = 'per100'; foodCustomNameDraft = '';
+        render();
+      }
+      return;
     }
 
+    const kcalPer100 = parseFloat(document.getElementById('custom-food-kcal')?.value);
+    if (!(kcalPer100 >= 0)) { toast('Enter kcal per 100g'); return; }
     foodSelected = { name, kcalPer100, custom: true };
     foodMode = 'search'; recipeBasis = 'per100'; foodCustomNameDraft = '';
     render();
@@ -1329,15 +1340,20 @@
     const qty = parseFloat(document.getElementById('food-qty')?.value);
     const unit = document.getElementById('food-unit')?.value || 'g';
     if (!(qty > 0)) { toast('Enter a quantity'); return; }
-    const kcal = Math.round(foodSelected.kcalPer100 * qty / 100);
+    logFoodEntry(foodSelected.name, foodSelected.kcalPer100 * qty / 100, qty, unit);
+    foodSelected = null;
+    render();
+  }
+
+  // Shared by both the qty-based flow and the weightless "log as one item" flow.
+  function logFoodEntry(name, kcal, qty, unit) {
+    kcal = Math.round(kcal);
     const key = todayKey();
     if (!gymData[key]) gymData[key] = {};
     if (!gymData[key].food) gymData[key].food = [];
-    gymData[key].food.push({ id: crypto.randomUUID(), name: foodSelected.name, qty, unit, kcal });
-    foodSelected = null;
+    gymData[key].food.push({ id: crypto.randomUUID(), name, qty: qty || null, unit: unit || '', kcal });
     saveDraft(); saveToGist();
-    toast(`Logged ${qty}${unit} — ${kcal} kcal`);
-    render();
+    toast(qty ? `Logged ${qty}${unit} — ${kcal} kcal` : `Logged ${name} — ${kcal} kcal`);
   }
 
   function deleteFoodEntry(i) {
