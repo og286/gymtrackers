@@ -410,7 +410,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v11';
+  const APP_VERSION = 'v12';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -442,11 +442,11 @@
   let lastSyncTime   = 0;
   let lastTimerSecs  = parseInt(localStorage.getItem('gymTimerSecs')) || 60;
   let cardioSelectedType = 'run';
-  let foodMode = 'search';     // 'search' | 'custom'
-  let foodSearchQuery = '';
-  let foodSearchResults = [];
-  let foodSearchTimer = null;
+  let foodMode = 'recipes';    // 'recipes' | 'custom'
   let foodSelected = null;     // { name, kcalPer100, custom? }
+  let recipeBook = null;       // cached array parsed from the recipe book site, or null if not loaded
+  let recipeBookLoading = false;
+  let recipeBookError = null;
   let recipeBasis = 'per100';  // 'per100' | 'whole' — for the custom recipe form
   let foodCustomNameDraft = '';
 
@@ -1182,16 +1182,38 @@
           `}
           <div class="log-actions">
             <button class="btn-log-food" onclick="confirmCustomFood()">Use this</button>
-            <button class="btn-move" onclick="toggleFoodMode()">‹ Search instead</button>
+            <button class="btn-move" onclick="toggleFoodMode()">‹ Back to recipes</button>
           </div>
         </div>`;
     } else {
+      let listHtml;
+      if (recipeBookLoading) {
+        listHtml = `<div class="food-search-status">Loading recipes…</div>`;
+      } else if (recipeBookError) {
+        listHtml = `<div class="food-search-status">${esc(recipeBookError)}
+          <span class="food-mode-toggle" style="display:inline;padding:0" onclick="loadRecipeBook(true)">Retry</span></div>`;
+      } else if (recipeBook && recipeBook.length) {
+        listHtml = recipeBook.map((r,i) => {
+          const kcal = recipeKcalFor(r);
+          return `
+            <div class="food-result-item" onclick="logRecipe(${i})">
+              <div class="food-result-info">
+                <div class="food-result-name">${esc(r.title)}</div>
+                ${r.subtitle ? `<div class="food-result-brand">${esc(r.subtitle)}</div>` : ''}
+              </div>
+              <div class="food-result-kcal">${kcal != null ? kcal + ' kcal' : '–'}</div>
+            </div>`;
+        }).join('');
+      } else {
+        listHtml = `<div class="food-search-status">No recipes found.</div>`;
+      }
       stepHtml = `
         <div class="food-entry-form">
-          <input type="text" id="food-search-input" placeholder="Search a food…"
-            value="${esc(foodSearchQuery)}" oninput="onFoodSearchInput(this.value)">
-          <div class="food-results" id="food-results"></div>
-          <div class="food-mode-toggle" onclick="toggleFoodMode()">+ Add your own recipe</div>
+          <div class="food-results">${listHtml}</div>
+          <div style="display:flex;justify-content:center;gap:16px;padding-top:2px">
+            <span class="food-mode-toggle" style="padding-top:0" onclick="toggleFoodMode()">+ Add your own recipe</span>
+            <span class="food-mode-toggle" style="padding-top:0" onclick="loadRecipeBook(true)">↻ Refresh</span>
+          </div>
         </div>`;
     }
 
@@ -1220,18 +1242,17 @@
         ${APP_VERSION}
       </div>`;
 
-    if (!foodSelected && foodMode === 'search') {
-      if (foodSearchQuery.trim()) runFoodSearch(foodSearchQuery.trim());
-      setTimeout(() => document.getElementById('food-search-input')?.focus(), 50);
-    } else if (foodSelected) {
+    if (foodSelected) {
       setTimeout(() => document.getElementById('food-qty')?.focus(), 50);
     } else if (foodMode === 'custom') {
       setTimeout(() => document.getElementById('custom-food-name')?.focus(), 50);
+    } else if (foodMode === 'recipes' && recipeBook === null && !recipeBookLoading && !recipeBookError) {
+      loadRecipeBook();
     }
   }
 
   function toggleFoodMode() {
-    foodMode = foodMode === 'search' ? 'custom' : 'search';
+    foodMode = foodMode === 'recipes' ? 'custom' : 'recipes';
     recipeBasis = 'per100'; foodCustomNameDraft = '';
     render();
   }
@@ -1243,82 +1264,56 @@
     render();
   }
 
-  // Debounced search-as-you-type. Updates only the #food-results container
-  // (not a full render()) so the search input never loses focus mid-type.
-  function onFoodSearchInput(val) {
-    foodSearchQuery = val;
-    clearTimeout(foodSearchTimer);
-    const resultsEl = document.getElementById('food-results');
-    if (!val.trim()) {
-      foodSearchResults = [];
-      if (resultsEl) resultsEl.innerHTML = '';
-      return;
-    }
-    foodSearchTimer = setTimeout(() => runFoodSearch(val.trim()), 400);
-  }
+  // ── RECIPE BOOK ───────────────────────────────────────────────────────────
+  // Pulls Jon & Jo's recipe book (a separate hand-maintained page) and reads
+  // its embedded `const recipes = [...]` data out of the raw HTML. There's no
+  // JSON API for it, so this is a light scrape rather than a clean fetch —
+  // if that page's structure ever changes materially, this parser may need
+  // updating too. Cached in memory for the session; "↻ Refresh" re-fetches.
+  const RECIPE_BOOK_URL = 'https://www.rouston.co.uk/recipebook/';
 
-  async function runFoodSearch(query) {
-    const resultsEl = document.getElementById('food-results');
-    if (!resultsEl) return;
-    resultsEl.innerHTML = `<div class="food-search-status">Searching…</div>`;
-
-    let items = null;
+  async function loadRecipeBook(force) {
+    if (recipeBookLoading) return;
+    if (recipeBook && !force) return;
+    recipeBookLoading = true; recipeBookError = null;
+    if (currentTab === 'food') render();
     try {
-      items = await fetchOffResults(query);
-    } catch(e) {}
-
-    if (foodSearchQuery.trim() !== query) return; // stale — a newer keystroke has since fired
-
-    if (!items) {
-      resultsEl.innerHTML = `<div class="food-search-status">Search failed — try again in a moment.</div>`;
-      return;
+      const resp = await fetch(RECIPE_BOOK_URL, { cache: 'no-store' });
+      if (!resp.ok) throw new Error();
+      const html = await resp.text();
+      const start = html.indexOf('const recipes = [');
+      if (start === -1) throw new Error();
+      const arrStart = html.indexOf('[', start);
+      const endMarker = html.indexOf('\n];', arrStart);
+      if (endMarker === -1) throw new Error();
+      const src = html.slice(arrStart, endMarker + 2); // up to and including the closing ]
+      const list = new Function(`"use strict"; return (${src});`)();
+      recipeBook = list.filter(r => r && r.title && r.kcal);
+    } catch(e) {
+      recipeBook = null;
+      recipeBookError = 'Could not load the recipe book — check your connection.';
     }
-    foodSearchResults = items;
-    if (!items.length) {
-      resultsEl.innerHTML = `<div class="food-search-status">No results with calorie data — try "add your own recipe".</div>`;
-      return;
-    }
-    resultsEl.innerHTML = items.map((it,i) => `
-      <div class="food-result-item" onclick="selectFoodResult(${i})">
-        <div class="food-result-info">
-          <div class="food-result-name">${esc(it.name)}</div>
-          ${it.brand ? `<div class="food-result-brand">${esc(it.brand)}</div>` : ''}
-        </div>
-        <div class="food-result-kcal">${Math.round(it.kcalPer100)} kcal/100g</div>
-      </div>`).join('');
+    recipeBookLoading = false;
+    if (currentTab === 'food') render();
   }
 
-  // Open Food Facts' legacy `cgi/search.pl` endpoint returns intermittent
-  // 503s under load. Their newer search-a-licious API is far more reliable,
-  // so it's tried first; the legacy endpoint is kept only as a fallback in
-  // case the new one is ever down.
-  async function fetchOffResults(query) {
-    try {
-      const resp = await fetch(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(query)}&page_size=15&fields=product_name,brands,nutriments`);
-      if (resp.ok) return parseOffHits((await resp.json()).hits);
-    } catch(e) {}
-
-    const resp2 = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=15&fields=product_name,brands,nutriments`);
-    if (!resp2.ok) throw new Error('search failed');
-    return parseOffHits((await resp2.json()).products);
+  // Recipes carry either a shared kcal figure ({both: '~480 kcal'}) or
+  // separate ones per person ({jon: '...', jo: '...'}) — pick the one for
+  // whoever's currently signed in.
+  function recipeKcalFor(r) {
+    const mine = STORAGE_PREFIX === 'jon' ? r.kcal.jon : r.kcal.jo;
+    const raw = r.kcal.both || mine || r.kcal.jon || r.kcal.jo;
+    if (!raw) return null;
+    const m = String(raw).replace(/,/g, '').match(/(\d+(\.\d+)?)/);
+    return m ? Math.round(parseFloat(m[1])) : null;
   }
 
-  function parseOffHits(list) {
-    return (list || [])
-      .map(p => ({
-        name: (p.product_name || '').trim(),
-        brand: Array.isArray(p.brands) ? (p.brands[0] || '').trim() : (p.brands || '').split(',')[0].trim(),
-        kcalPer100: p.nutriments ? p.nutriments['energy-kcal_100g'] : undefined
-      }))
-      .filter(it => it.name && typeof it.kcalPer100 === 'number' && !isNaN(it.kcalPer100))
-      .slice(0, 10);
-  }
-
-  function selectFoodResult(i) {
-    const it = foodSearchResults[i];
-    if (!it) return;
-    foodSelected = { name: it.name, kcalPer100: it.kcalPer100 };
-    foodSearchQuery = ''; foodSearchResults = [];
+  function logRecipe(i) {
+    const r = recipeBook && recipeBook[i];
+    if (!r) return;
+    const kcal = recipeKcalFor(r);
+    if (kcal == null) { toast('No calorie figure for this recipe'); return; }
+    logFoodEntry(r.title, kcal, null, '');
     render();
   }
 
@@ -1335,12 +1330,12 @@
       if (totalQty > 0) {
         // Weight given — derive a per-100g basis so a portion can be logged next.
         foodSelected = { name, kcalPer100: totalKcal / totalQty * 100, custom: true };
-        foodMode = 'search'; recipeBasis = 'per100'; foodCustomNameDraft = '';
+        foodMode = 'recipes'; recipeBasis = 'per100'; foodCustomNameDraft = '';
         render();
       } else {
         // No weight — log the whole thing now as a single fixed-kcal entry.
         logFoodEntry(name, totalKcal, null, '');
-        foodMode = 'search'; recipeBasis = 'per100'; foodCustomNameDraft = '';
+        foodMode = 'recipes'; recipeBasis = 'per100'; foodCustomNameDraft = '';
         render();
       }
       return;
@@ -1487,7 +1482,7 @@
     ['w1','w2','cardio','food','history'].forEach(t =>
       document.getElementById('tab-'+t).classList.toggle('active', t===tab));
     openCardId = null; cardRows = null; showAddForm = false; showRenameForm = false;
-    foodSelected = null; foodMode = 'search'; foodSearchQuery = ''; foodSearchResults = [];
+    foodSelected = null; foodMode = 'recipes';
     render();
   }
 
