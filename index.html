@@ -410,7 +410,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v10';
+  const APP_VERSION = 'v11';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -1261,40 +1261,57 @@
     const resultsEl = document.getElementById('food-results');
     if (!resultsEl) return;
     resultsEl.innerHTML = `<div class="food-search-status">Searching…</div>`;
+
+    let items = null;
     try {
-      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=15&fields=product_name,brands,nutriments`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error();
-      const data = await resp.json();
-      const items = (data.products || [])
-        .map(p => ({
-          name: (p.product_name || '').trim(),
-          brand: (p.brands || '').split(',')[0].trim(),
-          kcalPer100: p.nutriments ? p.nutriments['energy-kcal_100g'] : undefined
-        }))
-        .filter(it => it.name && typeof it.kcalPer100 === 'number' && !isNaN(it.kcalPer100))
-        .slice(0, 10);
+      items = await fetchOffResults(query);
+    } catch(e) {}
 
-      // Stale response guard: query may have changed while this was in flight
-      if (foodSearchQuery.trim() !== query) return;
+    if (foodSearchQuery.trim() !== query) return; // stale — a newer keystroke has since fired
 
-      foodSearchResults = items;
-      if (!items.length) {
-        resultsEl.innerHTML = `<div class="food-search-status">No results with calorie data — try "add your own recipe".</div>`;
-        return;
-      }
-      resultsEl.innerHTML = items.map((it,i) => `
-        <div class="food-result-item" onclick="selectFoodResult(${i})">
-          <div class="food-result-info">
-            <div class="food-result-name">${esc(it.name)}</div>
-            ${it.brand ? `<div class="food-result-brand">${esc(it.brand)}</div>` : ''}
-          </div>
-          <div class="food-result-kcal">${Math.round(it.kcalPer100)} kcal/100g</div>
-        </div>`).join('');
-    } catch(e) {
-      if (foodSearchQuery.trim() !== query) return;
-      resultsEl.innerHTML = `<div class="food-search-status">Search failed — check your connection.</div>`;
+    if (!items) {
+      resultsEl.innerHTML = `<div class="food-search-status">Search failed — try again in a moment.</div>`;
+      return;
     }
+    foodSearchResults = items;
+    if (!items.length) {
+      resultsEl.innerHTML = `<div class="food-search-status">No results with calorie data — try "add your own recipe".</div>`;
+      return;
+    }
+    resultsEl.innerHTML = items.map((it,i) => `
+      <div class="food-result-item" onclick="selectFoodResult(${i})">
+        <div class="food-result-info">
+          <div class="food-result-name">${esc(it.name)}</div>
+          ${it.brand ? `<div class="food-result-brand">${esc(it.brand)}</div>` : ''}
+        </div>
+        <div class="food-result-kcal">${Math.round(it.kcalPer100)} kcal/100g</div>
+      </div>`).join('');
+  }
+
+  // Open Food Facts' legacy `cgi/search.pl` endpoint returns intermittent
+  // 503s under load. Their newer search-a-licious API is far more reliable,
+  // so it's tried first; the legacy endpoint is kept only as a fallback in
+  // case the new one is ever down.
+  async function fetchOffResults(query) {
+    try {
+      const resp = await fetch(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(query)}&page_size=15&fields=product_name,brands,nutriments`);
+      if (resp.ok) return parseOffHits((await resp.json()).hits);
+    } catch(e) {}
+
+    const resp2 = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=15&fields=product_name,brands,nutriments`);
+    if (!resp2.ok) throw new Error('search failed');
+    return parseOffHits((await resp2.json()).products);
+  }
+
+  function parseOffHits(list) {
+    return (list || [])
+      .map(p => ({
+        name: (p.product_name || '').trim(),
+        brand: Array.isArray(p.brands) ? (p.brands[0] || '').trim() : (p.brands || '').split(',')[0].trim(),
+        kcalPer100: p.nutriments ? p.nutriments['energy-kcal_100g'] : undefined
+      }))
+      .filter(it => it.name && typeof it.kcalPer100 === 'number' && !isNaN(it.kcalPer100))
+      .slice(0, 10);
   }
 
   function selectFoodResult(i) {
