@@ -1,6 +1,6 @@
 // Gym Tracker service worker — caches the app shell for offline loading.
 // GitHub API calls always go to the network.
-const CACHE = 'gym-tracker-v11';
+const CACHE = 'gym-tracker-v13';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -23,10 +23,12 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  const url = e.request.url;
-  // GitHub (sync) and Open Food Facts (search, different results per query
-  // string) must always hit the network — never cache these.
-  if (url.includes('api.github.com') || url.includes('openfoodfacts.org') || e.request.method !== 'GET') return;
+  // Only ever cache same-origin GET requests (the app shell itself).
+  // Everything cross-origin — GitHub sync, the recipe book, or any other
+  // API added later — always goes straight to the network, so results are
+  // never served stale from here.
+  const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin || e.request.method !== 'GET') return;
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then(cached =>
       cached ||

@@ -410,7 +410,7 @@
 </div>
 
 <script>
-  const APP_VERSION = 'v12';
+  const APP_VERSION = 'v13';
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   const USERS = {
@@ -1265,12 +1265,11 @@
   }
 
   // ── RECIPE BOOK ───────────────────────────────────────────────────────────
-  // Pulls Jon & Jo's recipe book (a separate hand-maintained page) and reads
-  // its embedded `const recipes = [...]` data out of the raw HTML. There's no
-  // JSON API for it, so this is a light scrape rather than a clean fetch —
-  // if that page's structure ever changes materially, this parser may need
-  // updating too. Cached in memory for the session; "↻ Refresh" re-fetches.
-  const RECIPE_BOOK_URL = 'https://www.rouston.co.uk/recipebook/';
+  // Pulls Jon & Jo's recipe book (a separate hand-maintained page) via its
+  // published recipes.json — a plain JSON export the recipe book site is
+  // the source of truth for. Cached in memory for the session; "↻ Refresh"
+  // re-fetches.
+  const RECIPE_BOOK_URL = 'https://www.rouston.co.uk/recipebook/recipes.json';
 
   async function loadRecipeBook(force) {
     if (recipeBookLoading) return;
@@ -1280,14 +1279,7 @@
     try {
       const resp = await fetch(RECIPE_BOOK_URL, { cache: 'no-store' });
       if (!resp.ok) throw new Error();
-      const html = await resp.text();
-      const start = html.indexOf('const recipes = [');
-      if (start === -1) throw new Error();
-      const arrStart = html.indexOf('[', start);
-      const endMarker = html.indexOf('\n];', arrStart);
-      if (endMarker === -1) throw new Error();
-      const src = html.slice(arrStart, endMarker + 2); // up to and including the closing ]
-      const list = new Function(`"use strict"; return (${src});`)();
+      const list = await resp.json();
       recipeBook = list.filter(r => r && r.title && r.kcal);
     } catch(e) {
       recipeBook = null;
